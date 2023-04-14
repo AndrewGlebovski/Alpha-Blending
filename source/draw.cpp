@@ -101,7 +101,7 @@ int blend_images(const char *front, const char *back) {
         }
 
 
-        blend_pixels(pixels, front_pixels, back_pixels);
+        for (size_t i = 0; i < 10000; i++) blend_pixels(pixels, front_pixels, back_pixels);
         tool_image.create(SCREEN_W, SCREEN_H, pixels);
         tool_texture.loadFromImage(tool_image);
         sf::Sprite tool_sprite(tool_texture);
@@ -114,7 +114,7 @@ int blend_images(const char *front, const char *back) {
 
 
         curr_time = clock.getElapsedTime();
-        int fps = (int)(1.0f / (curr_time.asSeconds() - prev_time.asSeconds()));
+        int fps = (int)(10000.0f / (curr_time.asSeconds() - prev_time.asSeconds()));
         sprintf(fps_text, "FPS: %i", fps);
         status.setString(fps_text);
         prev_time = curr_time;
