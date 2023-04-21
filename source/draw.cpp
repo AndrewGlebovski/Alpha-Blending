@@ -5,17 +5,10 @@
 
 #include <SFML/Graphics.hpp>
 #include <assert.h>
+#include <immintrin.h>
 #include <memory.h>
 #include "configs.hpp"
 #include "draw.hpp"
-
-
-typedef struct {
-    uint32_t r = 0;
-    uint32_t g = 0;
-    uint32_t b = 0;
-    uint32_t a = 0;
-} PixelColor;
 
 
 const uint8_t ZERO = 255u;      /// Zero value in shuffle function
@@ -147,22 +140,66 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
 
 
     for (uint32_t y = 0; y < SCREEN_H; y++) {
-        for (uint32_t x = 0; x < SCREEN_W; x ++) {
-            PixelColor fr = {front[0], front[1], front[2], front[3]};
-            PixelColor bg = {back[0], back[1], back[2], back[3]};
+        for (uint32_t x = 0; x < SCREEN_W; x += 8) {
+            __m256i front_org = _mm256_load_si256((const __m256i *) front);
+            __m256i back_org = _mm256_load_si256((const __m256i *) back);
 
-            PixelColor buf = {
-                (fr.r * fr.a + bg.r * (255u - fr.a)) >> 8u,
-                (fr.g * fr.a + bg.g * (255u - fr.a)) >> 8u,
-                (fr.b * fr.a + bg.b * (255u - fr.a)) >> 8u,
-                255u
-            };
 
-            buffer[0] = (uint8_t) buf.r, buffer[1] = (uint8_t) buf.g, buffer[2] = (uint8_t) buf.b, buffer[3] = (uint8_t) buf.a;
+            __m256i front_l = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(front_org, 1));
+            __m256i front_h = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(front_org, 0));
 
-            front += sizeof(int);
-            back += sizeof(int);
-            buffer += sizeof(int);
+            __m256i back_l = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(back_org, 1));
+            __m256i back_h = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(back_org, 0));
+
+
+            __m256i shuffle_mask = _mm256_set_epi8(
+                ZERO, 14, ZERO, 14, ZERO,  14, ZERO,  14,  ZERO,  6,  ZERO,  6,  ZERO,  6,  ZERO,  6,
+                ZERO, 14, ZERO, 14, ZERO,  14, ZERO,  14,  ZERO,  6,  ZERO,  6,  ZERO,  6,  ZERO,  6
+            );
+
+
+            __m256i alpha_l = _mm256_shuffle_epi8(front_l, shuffle_mask);
+            __m256i alpha_h = _mm256_shuffle_epi8(front_h, shuffle_mask);;
+
+
+            front_l = _mm256_mullo_epi16(front_l, alpha_l);
+            front_h = _mm256_mullo_epi16(front_h, alpha_h);
+
+
+            alpha_l = _mm256_subs_epu16(_mm256_set1_epi16(255), alpha_l);
+            alpha_h = _mm256_subs_epu16(_mm256_set1_epi16(255), alpha_h);
+
+
+            back_l = _mm256_mullo_epi16(back_l, alpha_l);
+            back_h = _mm256_mullo_epi16(back_h, alpha_h);
+
+
+            __m256i sum_l = _mm256_add_epi16(front_l, back_l);
+            __m256i sum_h = _mm256_add_epi16(front_h, back_h);
+
+
+            shuffle_mask = _mm256_set_epi8(
+                  15,   13,   11,    9,    7,    5,    3,    1, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,
+                ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,   15,   13,   11,    9,    7,    5,    3,    1
+            );
+
+
+            sum_l = _mm256_shuffle_epi8(sum_l, shuffle_mask);
+            sum_h = _mm256_shuffle_epi8(sum_h, shuffle_mask);
+
+
+            __m256i colors = _mm256_set_m128i(  /// IT'S REVERSED CAUSE VECTOR REVERSE ARRAY VALUES
+                _mm_add_epi8(_mm256_extracti128_si256(sum_l, 0), _mm256_extracti128_si256(sum_l, 1)),
+                _mm_add_epi8(_mm256_extracti128_si256(sum_h, 0), _mm256_extracti128_si256(sum_h, 1))
+            );
+            
+ 
+            _mm256_store_si256((__m256i *) buffer, colors);
+
+
+            front += 8 * sizeof(int);
+            back += 8 * sizeof(int);
+            buffer += 8 * sizeof(int);
         }
     }
 }
