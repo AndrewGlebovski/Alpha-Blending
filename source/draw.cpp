@@ -158,7 +158,7 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
                 255u
             };
 
-            buffer[0] = (uint8_t) buf.r, buffer[1] = (uint8_t) buf.b, buffer[2] = (uint8_t) buf.g, buffer[3] = (uint8_t) buf.a;
+            buffer[0] = (uint8_t) buf.r, buffer[1] = (uint8_t) buf.g, buffer[2] = (uint8_t) buf.b, buffer[3] = (uint8_t) buf.a;
 
             front += sizeof(int);
             back += sizeof(int);
