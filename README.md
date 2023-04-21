@@ -7,7 +7,7 @@
 ## Цель
 
 
-Закрепить умение оптимизировать повторяющиеся однотипные вычисления на CPU с помощью SIMD и писать красивые README. (см также [Mandelbrot-Set](https://github.com/AndrewGlebovski/Mandelbrot-Set))
+Закрепить умение оптимизировать повторяющиеся однотипные вычисления на CPU с помощью SIMD. (см также [Mandelbrot-Set](https://github.com/AndrewGlebovski/Mandelbrot-Set))
 
 
 ## Введение
