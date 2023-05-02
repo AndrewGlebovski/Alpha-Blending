@@ -15,6 +15,31 @@ const uint8_t ZERO = 255u;      /// Zero value in shuffle function
 const size_t BUF_ALIGN = 32;    /// Pixel array required alignment
 
 
+typedef enum {
+    OK,                         ///< OK
+    FILE_NOT_FOUND,             ///< File does not exist
+    ALLOC_FAIL,                 ///< Failed to allocate memory
+    ALIGN_FAIL                  ///< Memory is not aligned
+} EXIT_CODES;
+
+
+#define ASSERT(condition, exitcode, ...)                \
+do {                                                    \
+    if (!(condition)) {                                 \
+        printf(__VA_ARGS__);                            \
+        return exitcode;                                \
+    }                                                   \
+} while(0)
+
+
+#define CHECK_ALIGN(ptr, ...)                                   \
+do {                                                            \
+    if (ptr && (unsigned long long) ptr & (BUF_ALIGN - 1)) {    \
+        __VA_ARGS__                                             \
+    }                                                           \
+} while(0)
+
+
 /**
  * \brief Alpha blends foreground and background pixels and store result in buffer
  * \param [out] buffer  Buffer to store pixels colors
@@ -59,10 +84,7 @@ int blend_images(const char *front, const char *back) {
 
 
     sf::Font font;
-    if (!font.loadFromFile(FONT_FILE)) {
-        printf("Can't open %s!\n", FONT_FILE);
-        return 1;
-    }
+    ASSERT(font.loadFromFile(FONT_FILE), FILE_NOT_FOUND, "Can't open %s!\n", FONT_FILE);
 
     sf::Text status(sf::String("FPS: 0"), font, FONT_SIZE);
     status.setFillColor(sf::Color().Black);
@@ -75,16 +97,18 @@ int blend_images(const char *front, const char *back) {
 
 
     uint8_t *pixels = (uint8_t *) aligned_alloc(BUF_ALIGN, SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t));
-    if (!pixels) {
-        printf("Can't allocate buffer for pixels colors!\n");
-        return 1;
-    }
+    ASSERT(pixels, FILE_NOT_FOUND, "Can't allocate buffer for pixels colors!\n");
+    CHECK_ALIGN(pixels,
+        printf("Buffer for pixels is not aligned!\n");
+        return ALIGN_FAIL;
+    );
 
 
     uint8_t *front_pixels = nullptr, *back_pixels = nullptr;
-    if (load_images(front, back, &front_pixels, &back_pixels)) {
+    int error = load_images(front, back, &front_pixels, &back_pixels);
+    if (error) {
         free(pixels);
-        return 1;
+        return error;
     }
 
 
@@ -134,9 +158,9 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
     assert(back && "Can't work with null back buffer!\n");
 
 
-    assert(!((unsigned long long) buffer & 0x1F) && "Buffer has invalid alignment!\n");
-    assert(!((unsigned long long) front & 0x1F) && "Front buffer has invalid alignment!\n");
-    assert(!((unsigned long long) back & 0x1F) && "Back buffer has invalid alignment!\n");
+    assert(!((unsigned long long) buffer & (BUF_ALIGN - 1)) && "Buffer has invalid alignment!\n");
+    assert(!((unsigned long long) front & (BUF_ALIGN - 1)) && "Front buffer has invalid alignment!\n");
+    assert(!((unsigned long long) back & (BUF_ALIGN - 1)) && "Back buffer has invalid alignment!\n");
 
 
     for (uint32_t y = 0; y < SCREEN_H; y++) {
@@ -221,17 +245,15 @@ int load_images(const char *front_filename, const char *back_filename, uint8_t *
 
     tool_image.loadFromFile(front_filename);
 
-    if (!tool_image.getPixelsPtr()){
-        printf("%s not found!\n", front_filename);
-        return 1;
-    }
+    ASSERT(tool_image.getPixelsPtr(), FILE_NOT_FOUND, "%s not found!\n", front_filename);
 
     *front_buffer = resize_image(tool_image.getPixelsPtr(), tool_image.getSize().x, tool_image.getSize().y, 175400, SCREEN_W, SCREEN_H);
 
-    if (!(*front_buffer)) {
-        printf("Can't allocate buffer for foreground image pixels!\n");
-        return 1;
-    }
+    ASSERT(*front_buffer, ALLOC_FAIL, "Can't allocate buffer for foreground image pixels!\n");
+    CHECK_ALIGN(*front_buffer,
+        printf("Buffer for front pixels is not aligned!\n");
+        return ALIGN_FAIL;
+    );
 
     tool_image.loadFromFile(back_filename);
 
@@ -240,7 +262,7 @@ int load_images(const char *front_filename, const char *back_filename, uint8_t *
         *front_buffer = nullptr;
 
         printf("%s not found!\n", back_filename);
-        return 1;
+        return FILE_NOT_FOUND;
     }
 
     *back_buffer = (uint8_t *) aligned_alloc(BUF_ALIGN, SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t));
@@ -250,8 +272,15 @@ int load_images(const char *front_filename, const char *back_filename, uint8_t *
         *front_buffer = nullptr;
 
         printf("Can't allocate buffer for background image pixels!\n");
-        return 1;
+        return ALLOC_FAIL;
     }
+    CHECK_ALIGN(*back_buffer,
+        free(*front_buffer);
+        *front_buffer = nullptr;
+
+        printf("Buffer for background pixels is not aligned!\n");
+        return ALIGN_FAIL;
+    );
 
     memcpy(*back_buffer, tool_image.getPixelsPtr(), SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t));
 
