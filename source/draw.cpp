@@ -11,16 +11,27 @@
 #include "draw.hpp"
 
 
-const uint8_t ZERO = 255u;      /// Zero value in shuffle function
-const size_t BUF_ALIGN = 32;    /// Pixel array required alignment
+const uint8_t ZERO = 255u;          ///< Zero value in shuffle function
+const size_t BUF_ALIGN = 32;        ///< Pixel array required alignment
+
+const size_t FPS_BUFFER_SIZE = 100; ///< FPS buffer size
+const size_t FPS_TEXT_SIZE = 30;    ///< String maximum size
+const size_t TEST_NUMBER = 10000;   ///< Amount of tests
+
+const size_t IMG_BUFFER_SIZE = SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t);   ///< Standart buffer size for all images
 
 
 typedef enum {
     OK,                         ///< OK
     FILE_NOT_FOUND,             ///< File does not exist
-    ALLOC_FAIL,                 ///< Failed to allocate memory
-    ALIGN_FAIL                  ///< Memory is not aligned
+    ALLOC_FAIL,                 ///< Failed to allocate memory or allocated memory was not aligned properly
+    MEM_FAIL                    ///< Operation with memory failed
 } EXIT_CODES;
+
+
+typedef struct {
+    sf::Window  *window = nullptr;      ///< Application window
+} EventArgs;
 
 
 #define ASSERT(condition, exitcode, ...)                \
@@ -32,11 +43,13 @@ do {                                                    \
 } while(0)
 
 
-#define CHECK_ALIGN(ptr, ...)                                   \
-do {                                                            \
-    if (ptr && (unsigned long long) ptr & (BUF_ALIGN - 1)) {    \
-        __VA_ARGS__                                             \
-    }                                                           \
+#define REPEAT(condition, ...)                          \
+do {                                                    \
+    int exitcode = (condition);                         \
+    if (exitcode) {                                     \
+        __VA_ARGS__                                     \
+        return exitcode;                                \
+    }                                                   \
 } while(0)
 
 
@@ -74,6 +87,40 @@ uint8_t *resize_image(const uint8_t *prev_image, size_t prev_width, size_t prev_
 int load_images(const char *front_filename, const char *back_filename, uint8_t **front_buffer, uint8_t **back_buffer);
 
 
+/**
+ * \brief Prints fps and store FPS into FPS buffer
+ * \param [out] status      Text class to fill with FPS
+ * \param [in]  clock       Clock class to get time passed
+ * \param [out] prev_time   Required to calculate FPS
+ * \param [out] fps_buffer  FPS buffer to store FPS value
+*/
+void print_fps(sf::Text *status, sf::Clock *clock, sf::Time *prev_time, int *fps_buffer);
+
+
+/**
+ * \brief Prints what FPS buffer contains
+ * \param [in] fps_buffer   FPS buffer
+*/
+void show_fps_buffer(int *fps_buffer);
+
+
+/**
+ * \brief Handles all types of events
+ * \param [in,out] args Contains all necessary arguments
+ * \return Non zero value means error 
+*/
+int event_parser(EventArgs *args);
+
+
+/**
+ * \brief Allocates alligned memory
+ * \param [out] buffer  Save allocated memory address
+ * \param [in]  size    Required memory size
+ * \return Non zero value means error
+*/
+int safe_aligned_alloc(uint8_t **buffer, size_t size);
+
+
 
 
 int blend_images(const char *front, const char *back) {
@@ -82,75 +129,117 @@ int blend_images(const char *front, const char *back) {
 
     sf::RenderWindow window(sf::VideoMode(SCREEN_W, SCREEN_H), "AlphaBlending3000");
 
-
     sf::Font font;
     ASSERT(font.loadFromFile(FONT_FILE), FILE_NOT_FOUND, "Can't open %s!\n", FONT_FILE);
 
     sf::Text status(sf::String("FPS: 0"), font, FONT_SIZE);
     status.setFillColor(sf::Color().Black);
 
-
     sf::Clock clock;
     sf::Time prev_time = clock.getElapsedTime();
-    sf::Time curr_time = sf::seconds(0);
-    char fps_text[30] = "";
 
-
-    uint8_t *pixels = (uint8_t *) aligned_alloc(BUF_ALIGN, SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t));
-    ASSERT(pixels, FILE_NOT_FOUND, "Can't allocate buffer for pixels colors!\n");
-    CHECK_ALIGN(pixels,
-        free(pixels);
-
-        printf("Buffer for pixels is not aligned!\n");
-        return ALIGN_FAIL;
-    );
-
+    uint8_t *pixels = nullptr;
+    REPEAT(safe_aligned_alloc(&pixels, IMG_BUFFER_SIZE));
 
     uint8_t *front_pixels = nullptr, *back_pixels = nullptr;
-    int error = load_images(front, back, &front_pixels, &back_pixels);
-    if (error) {
-        free(pixels);
-        return error;
-    }
-
+    REPEAT(load_images(front, back, &front_pixels, &back_pixels), free(pixels););
 
     sf::Image tool_image;
     sf::Texture tool_texture;
 
+    int *fps_buffer = (int *) calloc(FPS_BUFFER_SIZE, sizeof(int));
+    ASSERT(fps_buffer, ALLOC_FAIL, "Failed to allocate FPS Buffer!\n");
+
+    EventArgs event_args = {&window};
 
     while (window.isOpen()) {
-        sf::Event event;
-        while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed) {
-                window.close();
-            }
-        }
+        if (event_parser(&event_args)) break;
 
+        for (size_t i = 0; i < TEST_NUMBER; i++) blend_pixels(pixels, front_pixels, back_pixels);
 
-        for (size_t i = 0; i < 10000; i++) blend_pixels(pixels, front_pixels, back_pixels);
         tool_image.create(SCREEN_W, SCREEN_H, pixels);
         tool_texture.loadFromImage(tool_image);
         sf::Sprite tool_sprite(tool_texture);
 
+        print_fps(&status, &clock, &prev_time, fps_buffer);
 
         window.clear();
         window.draw(tool_sprite);
         window.draw(status);
         window.display();
-
-
-        curr_time = clock.getElapsedTime();
-        int fps = (int)(10000.0f / (curr_time.asSeconds() - prev_time.asSeconds()));
-        sprintf(fps_text, "FPS: %i", fps);
-        status.setString(fps_text);
-        prev_time = curr_time;
     }
+
+    show_fps_buffer(fps_buffer);
+    free(fps_buffer);
 
     free(pixels);
     free(front_pixels);
     free(back_pixels);
 
+    return OK;
+}
+
+
+int safe_aligned_alloc(uint8_t **buffer, size_t size) {
+    if (!buffer) return ALLOC_FAIL;
+
+    *buffer = (uint8_t *) aligned_alloc(BUF_ALIGN, size);
+
+    if (!*buffer) {
+        return ALLOC_FAIL;
+    }
+
+    if ((unsigned long long) buffer & (BUF_ALIGN - 1)) {
+        free(*buffer);
+        *buffer = nullptr;
+        return ALLOC_FAIL;
+    }
+
+    return OK;
+}
+
+
+int event_parser(EventArgs *args) {
+    assert(args && "Can't parse events without args!\n");
+
+    sf::Event event;
+    while (args -> window -> pollEvent(event)) {
+        if (event.type == sf::Event::Closed) {
+            args -> window -> close();
+            return 1;
+        }
+    }
+
     return 0;
+}
+
+
+void print_fps(sf::Text *status, sf::Clock *clock, sf::Time *prev_time, int *fps_buffer) {
+    assert(prev_time && "Can't print fps without prev time pointer!\n");
+    assert(fps_buffer && "Can't print fps without fps buffer!\n");
+
+    static size_t fps_index = 0;
+
+    sf::Time curr_time = clock -> getElapsedTime();
+
+    int fps = (int)((float) TEST_NUMBER * 1.0f / (curr_time.asSeconds() - prev_time -> asSeconds()));
+
+    char fps_text[FPS_TEXT_SIZE] = "";
+    sprintf(fps_text, "FPS: %i", fps);
+    status -> setString(fps_text);
+
+    *prev_time = curr_time;
+
+    fps_buffer[fps_index] = fps;
+    fps_index = (fps_index + 1) % FPS_BUFFER_SIZE;
+}
+
+
+void show_fps_buffer(int *fps_buffer) {
+    assert(fps_buffer && "Can't show null fps buffer!\n");
+
+    for (size_t i = 0; i < FPS_BUFFER_SIZE; i++) printf("%d, ", fps_buffer[i]);
+    putchar('\n');
 }
 
 
@@ -159,11 +248,9 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
     assert(front && "Can't work with null front buffer!\n");
     assert(back && "Can't work with null back buffer!\n");
 
-
     assert(!((unsigned long long) buffer & (BUF_ALIGN - 1)) && "Buffer has invalid alignment!\n");
     assert(!((unsigned long long) front & (BUF_ALIGN - 1)) && "Front buffer has invalid alignment!\n");
     assert(!((unsigned long long) back & (BUF_ALIGN - 1)) && "Back buffer has invalid alignment!\n");
-
 
     for (uint32_t y = 0; y < SCREEN_H; y++) {
         for (uint32_t x = 0; x < SCREEN_W; x += 8) {
@@ -223,17 +310,17 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
             _mm256_store_si256((__m256i *) buffer, colors);
 
 
-            front += 8 * sizeof(int);
-            back += 8 * sizeof(int);
-            buffer += 8 * sizeof(int);
+            front   += 8 * sizeof(int);
+            back    += 8 * sizeof(int);
+            buffer  += 8 * sizeof(int);
         }
     }
 }
 
 
 uint8_t *resize_image(const uint8_t *prev_image, size_t prev_width, size_t prev_height, size_t offset, size_t new_width, size_t new_height) {
-    uint8_t *new_image = (uint8_t *) aligned_alloc(BUF_ALIGN, new_width * new_height * 4 * sizeof(uint8_t));
-    if (!new_image) return nullptr;
+    uint8_t *new_image = nullptr;
+    if (safe_aligned_alloc(&new_image, new_width * new_height * 4 * sizeof(uint8_t))) return nullptr;
 
     for (size_t y = 0; y < prev_height; y++)
         memcpy(new_image + (offset + y * new_width) * 4, prev_image + (y * prev_width) * 4, 4 * prev_width);
@@ -250,47 +337,20 @@ int load_images(const char *front_filename, const char *back_filename, uint8_t *
     ASSERT(tool_image.getPixelsPtr(), FILE_NOT_FOUND, "%s not found!\n", front_filename);
 
     *front_buffer = resize_image(tool_image.getPixelsPtr(), tool_image.getSize().x, tool_image.getSize().y, 175400, SCREEN_W, SCREEN_H);
-
     ASSERT(*front_buffer, ALLOC_FAIL, "Can't allocate buffer for foreground image pixels!\n");
-    CHECK_ALIGN(*front_buffer,
-        free(front_buffer);
-        *front_buffer = nullptr;
-
-        printf("Buffer for front pixels is not aligned!\n");
-        return ALIGN_FAIL;
-    );
 
     tool_image.loadFromFile(back_filename);
 
     if (!tool_image.getPixelsPtr()){
-        free(*front_buffer);
-        *front_buffer = nullptr;
+        free(*front_buffer), *front_buffer = nullptr;
 
         printf("%s not found!\n", back_filename);
         return FILE_NOT_FOUND;
     }
 
-    *back_buffer = (uint8_t *) aligned_alloc(BUF_ALIGN, SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t));
+    REPEAT(safe_aligned_alloc(back_buffer, IMG_BUFFER_SIZE), free(*front_buffer); *front_buffer = nullptr;);
 
-    if (!(*back_buffer)) {
-        free(*front_buffer);
-        *front_buffer = nullptr;
+    ASSERT(memcpy(*back_buffer, tool_image.getPixelsPtr(), IMG_BUFFER_SIZE), MEM_FAIL, "Memcopy failed!\n");
 
-        printf("Can't allocate buffer for background image pixels!\n");
-        return ALLOC_FAIL;
-    }
-    CHECK_ALIGN(*back_buffer,
-        free(*front_buffer);
-        *front_buffer = nullptr;
-
-        free(*back_buffer);
-        *back_buffer = nullptr;
-
-        printf("Buffer for background pixels is not aligned!\n");
-        return ALIGN_FAIL;
-    );
-
-    memcpy(*back_buffer, tool_image.getPixelsPtr(), SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t));
-
-    return 0;
+    return OK;
 }
