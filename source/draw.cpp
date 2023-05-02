@@ -11,12 +11,21 @@
 #include "draw.hpp"
 
 
+#ifndef OPTI
+
+typedef struct {
+    uint32_t r = 0;
+    uint32_t g = 0;
+    uint32_t b = 0;
+    uint32_t a = 0;
+} PixelColor;
+
+#endif
+
+
 const uint8_t ZERO = 255u;          ///< Zero value in shuffle function
 const size_t BUF_ALIGN = 32;        ///< Pixel array required alignment
-
-const size_t FPS_BUFFER_SIZE = 100; ///< FPS buffer size
-const size_t FPS_TEXT_SIZE = 30;    ///< String maximum size
-const size_t TEST_NUMBER = 10000;   ///< Amount of tests
+const size_t TEST_NUMBER = 8;
 
 const size_t IMG_BUFFER_SIZE = SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t);   ///< Standart buffer size for all images
 
@@ -88,23 +97,6 @@ int load_images(const char *front_filename, const char *back_filename, uint8_t *
 
 
 /**
- * \brief Prints fps and store FPS into FPS buffer
- * \param [out] status      Text class to fill with FPS
- * \param [in]  clock       Clock class to get time passed
- * \param [out] prev_time   Required to calculate FPS
- * \param [out] fps_buffer  FPS buffer to store FPS value
-*/
-void print_fps(sf::Text *status, sf::Clock *clock, sf::Time *prev_time, int *fps_buffer);
-
-
-/**
- * \brief Prints what FPS buffer contains
- * \param [in] fps_buffer   FPS buffer
-*/
-void show_fps_buffer(int *fps_buffer);
-
-
-/**
  * \brief Handles all types of events
  * \param [in,out] args Contains all necessary arguments
  * \return Non zero value means error 
@@ -132,12 +124,6 @@ int blend_images(const char *front, const char *back) {
     sf::Font font;
     ASSERT(font.loadFromFile(FONT_FILE), FILE_NOT_FOUND, "Can't open %s!\n", FONT_FILE);
 
-    sf::Text status(sf::String("FPS: 0"), font, FONT_SIZE);
-    status.setFillColor(sf::Color().Black);
-
-    sf::Clock clock;
-    sf::Time prev_time = clock.getElapsedTime();
-
     uint8_t *pixels = nullptr;
     REPEAT(safe_aligned_alloc(&pixels, IMG_BUFFER_SIZE));
 
@@ -147,31 +133,22 @@ int blend_images(const char *front, const char *back) {
     sf::Image tool_image;
     sf::Texture tool_texture;
 
-    int *fps_buffer = (int *) calloc(FPS_BUFFER_SIZE, sizeof(int));
-    ASSERT(fps_buffer, ALLOC_FAIL, "Failed to allocate FPS Buffer!\n");
+    blend_pixels(pixels, front_pixels, back_pixels);
 
+    tool_image.create(SCREEN_W, SCREEN_H, pixels);
+    tool_texture.loadFromImage(tool_image);
+    sf::Sprite tool_sprite(tool_texture);
+    
     EventArgs event_args = {&window};
 
     while (window.isOpen()) {
         if (event_parser(&event_args)) break;
 
-        for (size_t i = 0; i < TEST_NUMBER; i++) blend_pixels(pixels, front_pixels, back_pixels);
-
-        tool_image.create(SCREEN_W, SCREEN_H, pixels);
-        tool_texture.loadFromImage(tool_image);
-        sf::Sprite tool_sprite(tool_texture);
-
-        print_fps(&status, &clock, &prev_time, fps_buffer);
-
         window.clear();
         window.draw(tool_sprite);
-        window.draw(status);
         window.display();
     }
-
-    show_fps_buffer(fps_buffer);
-    free(fps_buffer);
-
+    
     free(pixels);
     free(front_pixels);
     free(back_pixels);
@@ -189,9 +166,8 @@ int safe_aligned_alloc(uint8_t **buffer, size_t size) {
         return ALLOC_FAIL;
     }
 
-    if ((unsigned long long) buffer & (BUF_ALIGN - 1)) {
-        free(*buffer);
-        *buffer = nullptr;
+    if ((unsigned long long) *buffer & (BUF_ALIGN - 1)) {
+        free(*buffer), *buffer = nullptr;
         return ALLOC_FAIL;
     }
 
@@ -214,35 +190,6 @@ int event_parser(EventArgs *args) {
 }
 
 
-void print_fps(sf::Text *status, sf::Clock *clock, sf::Time *prev_time, int *fps_buffer) {
-    assert(prev_time && "Can't print fps without prev time pointer!\n");
-    assert(fps_buffer && "Can't print fps without fps buffer!\n");
-
-    static size_t fps_index = 0;
-
-    sf::Time curr_time = clock -> getElapsedTime();
-
-    int fps = (int)((float) TEST_NUMBER * 1.0f / (curr_time.asSeconds() - prev_time -> asSeconds()));
-
-    char fps_text[FPS_TEXT_SIZE] = "";
-    sprintf(fps_text, "FPS: %i", fps);
-    status -> setString(fps_text);
-
-    *prev_time = curr_time;
-
-    fps_buffer[fps_index] = fps;
-    fps_index = (fps_index + 1) % FPS_BUFFER_SIZE;
-}
-
-
-void show_fps_buffer(int *fps_buffer) {
-    assert(fps_buffer && "Can't show null fps buffer!\n");
-
-    for (size_t i = 0; i < FPS_BUFFER_SIZE; i++) printf("%d, ", fps_buffer[i]);
-    putchar('\n');
-}
-
-
 void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
     assert(buffer && "Can't set pixels with null buffer!\n");
     assert(front && "Can't work with null front buffer!\n");
@@ -252,69 +199,102 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
     assert(!((unsigned long long) front & (BUF_ALIGN - 1)) && "Front buffer has invalid alignment!\n");
     assert(!((unsigned long long) back & (BUF_ALIGN - 1)) && "Back buffer has invalid alignment!\n");
 
+    sf::Clock clock;
+
     for (uint32_t y = 0; y < SCREEN_H; y++) {
-        for (uint32_t x = 0; x < SCREEN_W; x += 8) {
-            __m256i front_org = _mm256_load_si256((const __m256i *) front);
-            __m256i back_org = _mm256_load_si256((const __m256i *) back);
+        #ifdef OPTI
+
+            for (uint32_t x = 0; x < SCREEN_W; x += 8) {
+                __m256i front_org = _mm256_load_si256((const __m256i *) front);
+                __m256i back_org = _mm256_load_si256((const __m256i *) back);
+                __m256i colors = _mm256_set1_epi32(0);
+
+                for (size_t i = 0; i < TEST_NUMBER * 8; i++) {
+                    __m256i front_l = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(front_org, 1));
+                    __m256i front_h = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(front_org, 0));
+
+                    __m256i back_l = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(back_org, 1));
+                    __m256i back_h = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(back_org, 0));
 
 
-            __m256i front_l = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(front_org, 1));
-            __m256i front_h = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(front_org, 0));
-
-            __m256i back_l = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(back_org, 1));
-            __m256i back_h = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(back_org, 0));
-
-
-            __m256i shuffle_mask = _mm256_set_epi8(
-                ZERO, 14, ZERO, 14, ZERO,  14, ZERO,  14,  ZERO,  6,  ZERO,  6,  ZERO,  6,  ZERO,  6,
-                ZERO, 14, ZERO, 14, ZERO,  14, ZERO,  14,  ZERO,  6,  ZERO,  6,  ZERO,  6,  ZERO,  6
-            );
+                    __m256i shuffle_mask = _mm256_set_epi8(
+                        ZERO, 14, ZERO, 14, ZERO,  14, ZERO,  14,  ZERO,  6,  ZERO,  6,  ZERO,  6,  ZERO,  6,
+                        ZERO, 14, ZERO, 14, ZERO,  14, ZERO,  14,  ZERO,  6,  ZERO,  6,  ZERO,  6,  ZERO,  6
+                    );
 
 
-            __m256i alpha_l = _mm256_shuffle_epi8(front_l, shuffle_mask);
-            __m256i alpha_h = _mm256_shuffle_epi8(front_h, shuffle_mask);;
+                    __m256i alpha_l = _mm256_shuffle_epi8(front_l, shuffle_mask);
+                    __m256i alpha_h = _mm256_shuffle_epi8(front_h, shuffle_mask);;
 
 
-            front_l = _mm256_mullo_epi16(front_l, alpha_l);
-            front_h = _mm256_mullo_epi16(front_h, alpha_h);
+                    front_l = _mm256_mullo_epi16(front_l, alpha_l);
+                    front_h = _mm256_mullo_epi16(front_h, alpha_h);
 
 
-            alpha_l = _mm256_subs_epu16(_mm256_set1_epi16(255), alpha_l);
-            alpha_h = _mm256_subs_epu16(_mm256_set1_epi16(255), alpha_h);
+                    alpha_l = _mm256_subs_epu16(_mm256_set1_epi16(255), alpha_l);
+                    alpha_h = _mm256_subs_epu16(_mm256_set1_epi16(255), alpha_h);
 
 
-            back_l = _mm256_mullo_epi16(back_l, alpha_l);
-            back_h = _mm256_mullo_epi16(back_h, alpha_h);
+                    back_l = _mm256_mullo_epi16(back_l, alpha_l);
+                    back_h = _mm256_mullo_epi16(back_h, alpha_h);
 
 
-            __m256i sum_l = _mm256_add_epi16(front_l, back_l);
-            __m256i sum_h = _mm256_add_epi16(front_h, back_h);
+                    __m256i sum_l = _mm256_add_epi16(front_l, back_l);
+                    __m256i sum_h = _mm256_add_epi16(front_h, back_h);
 
 
-            shuffle_mask = _mm256_set_epi8(
-                  15,   13,   11,    9,    7,    5,    3,    1, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,
-                ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,   15,   13,   11,    9,    7,    5,    3,    1
-            );
+                    shuffle_mask = _mm256_set_epi8(
+                        15,   13,   11,    9,    7,    5,    3,    1, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,
+                        ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,   15,   13,   11,    9,    7,    5,    3,    1
+                    );
 
 
-            sum_l = _mm256_shuffle_epi8(sum_l, shuffle_mask);
-            sum_h = _mm256_shuffle_epi8(sum_h, shuffle_mask);
+                    sum_l = _mm256_shuffle_epi8(sum_l, shuffle_mask);
+                    sum_h = _mm256_shuffle_epi8(sum_h, shuffle_mask);
 
 
-            __m256i colors = _mm256_set_m128i(
-                _mm_add_epi8(_mm256_extracti128_si256(sum_l, 0), _mm256_extracti128_si256(sum_l, 1)),
-                _mm_add_epi8(_mm256_extracti128_si256(sum_h, 0), _mm256_extracti128_si256(sum_h, 1))
-            );
-            
- 
-            _mm256_store_si256((__m256i *) buffer, colors);
+                    colors = _mm256_set_m128i(
+                        _mm_add_epi8(_mm256_extracti128_si256(sum_l, 0), _mm256_extracti128_si256(sum_l, 1)),
+                        _mm_add_epi8(_mm256_extracti128_si256(sum_h, 0), _mm256_extracti128_si256(sum_h, 1))
+                    );
+                }
+    
+                _mm256_store_si256((__m256i *) buffer, colors);
 
+                front   += 8 * sizeof(int);
+                back    += 8 * sizeof(int);
+                buffer  += 8 * sizeof(int);
+            }
 
-            front   += 8 * sizeof(int);
-            back    += 8 * sizeof(int);
-            buffer  += 8 * sizeof(int);
-        }
+        #else 
+
+            for (uint32_t x = 0; x < SCREEN_W; x++) {
+                PixelColor fr = {front[0], front[1], front[2], front[3]};
+                PixelColor bg = {back[0], back[1], back[2], back[3]};
+
+                for (size_t i = 0; i < TEST_NUMBER; i++) {
+                    fr = {
+                        (fr.r * fr.a + bg.r * (255u - fr.a)) >> 8u,
+                        (fr.g * fr.a + bg.g * (255u - fr.a)) >> 8u,
+                        (fr.b * fr.a + bg.b * (255u - fr.a)) >> 8u,
+                        255u
+                    };
+                }
+
+                buffer[0] = (uint8_t) fr.r;
+                buffer[1] = (uint8_t) fr.g;
+                buffer[2] = (uint8_t) fr.b;
+                buffer[3] = (uint8_t) fr.a;
+
+                front += sizeof(int);
+                back += sizeof(int);
+                buffer += sizeof(int);
+            }
+
+        #endif
     }
+
+    printf("%f\n", clock.getElapsedTime().asSeconds());
 }
 
 

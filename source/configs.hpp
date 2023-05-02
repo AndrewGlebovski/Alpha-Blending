@@ -12,3 +12,5 @@ const unsigned int FONT_SIZE = 24;              ///< Font size
 
 #define FRONT_IMAGE "assets/AskhatCat.bmp"      ///< Path to cat image
 #define BACK_IMAGE "assets/Table.bmp"           ///< Path to table image
+
+#define OPTI
