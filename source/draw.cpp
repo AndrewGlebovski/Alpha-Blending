@@ -14,10 +14,10 @@
 #ifndef OPTI
 
 typedef struct {
-    uint32_t r = 0;
-    uint32_t g = 0;
-    uint32_t b = 0;
-    uint32_t a = 0;
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    uint8_t a = 0;
 } PixelColor;
 
 #endif
@@ -269,22 +269,21 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
         #else 
 
             for (uint32_t x = 0; x < SCREEN_W; x++) {
-                PixelColor fr = {front[0], front[1], front[2], front[3]};
-                PixelColor bg = {back[0], back[1], back[2], back[3]};
+                PixelColor fr = {}; memcpy(&fr, front, 4);
+                PixelColor bg = {}; memcpy(&bg, back, 4);
+
+                unsigned int alpha = fr.a;
 
                 for (size_t i = 0; i < TEST_NUMBER; i++) {
                     fr = {
-                        (fr.r * fr.a + bg.r * (255u - fr.a)) >> 8u,
-                        (fr.g * fr.a + bg.g * (255u - fr.a)) >> 8u,
-                        (fr.b * fr.a + bg.b * (255u - fr.a)) >> 8u,
+                        (uint8_t) ((fr.r * alpha + bg.r * (255u - alpha)) >> 8),
+                        (uint8_t) ((fr.g * alpha + bg.g * (255u - alpha)) >> 8),
+                        (uint8_t) ((fr.b * alpha + bg.b * (255u - alpha)) >> 8),
                         255u
                     };
                 }
 
-                buffer[0] = (uint8_t) fr.r;
-                buffer[1] = (uint8_t) fr.g;
-                buffer[2] = (uint8_t) fr.b;
-                buffer[3] = (uint8_t) fr.a;
+                memcpy(buffer, &fr, 4);
 
                 front += sizeof(int);
                 back += sizeof(int);
