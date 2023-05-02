@@ -99,6 +99,8 @@ int blend_images(const char *front, const char *back) {
     uint8_t *pixels = (uint8_t *) aligned_alloc(BUF_ALIGN, SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t));
     ASSERT(pixels, FILE_NOT_FOUND, "Can't allocate buffer for pixels colors!\n");
     CHECK_ALIGN(pixels,
+        free(pixels);
+
         printf("Buffer for pixels is not aligned!\n");
         return ALIGN_FAIL;
     );
@@ -212,7 +214,7 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
             sum_h = _mm256_shuffle_epi8(sum_h, shuffle_mask);
 
 
-            __m256i colors = _mm256_set_m128i(  /// IT'S REVERSED CAUSE VECTOR REVERSE ARRAY VALUES
+            __m256i colors = _mm256_set_m128i(
                 _mm_add_epi8(_mm256_extracti128_si256(sum_l, 0), _mm256_extracti128_si256(sum_l, 1)),
                 _mm_add_epi8(_mm256_extracti128_si256(sum_h, 0), _mm256_extracti128_si256(sum_h, 1))
             );
@@ -251,6 +253,9 @@ int load_images(const char *front_filename, const char *back_filename, uint8_t *
 
     ASSERT(*front_buffer, ALLOC_FAIL, "Can't allocate buffer for foreground image pixels!\n");
     CHECK_ALIGN(*front_buffer,
+        free(front_buffer);
+        *front_buffer = nullptr;
+
         printf("Buffer for front pixels is not aligned!\n");
         return ALIGN_FAIL;
     );
@@ -277,6 +282,9 @@ int load_images(const char *front_filename, const char *back_filename, uint8_t *
     CHECK_ALIGN(*back_buffer,
         free(*front_buffer);
         *front_buffer = nullptr;
+
+        free(*back_buffer);
+        *back_buffer = nullptr;
 
         printf("Buffer for background pixels is not aligned!\n");
         return ALIGN_FAIL;
