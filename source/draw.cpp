@@ -25,7 +25,7 @@ typedef struct {
 
 const uint8_t ZERO = 255u;          ///< Zero value in shuffle function
 const size_t BUF_ALIGN = 32;        ///< Pixel array required alignment
-const size_t TEST_NUMBER = 8;
+const size_t TEST_NUMBER = 2;
 
 const size_t IMG_BUFFER_SIZE = SCREEN_W * SCREEN_H * 4 * sizeof(uint8_t);   ///< Standart buffer size for all images
 
@@ -64,9 +64,9 @@ do {                                                    \
 
 /**
  * \brief Alpha blends foreground and background pixels and store result in buffer
- * \param [out] buffer  Buffer to store pixels colors
- * \param [in]  front   Foreground image
- * \param [in]  back    Background image
+ * \param [out] buffer              Buffer to store pixels colors
+ * \param [in]  front_filename      Foreground image
+ * \param [in]  back_filename       Background image
 */
 void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back);
 
@@ -115,9 +115,9 @@ int safe_aligned_alloc(uint8_t **buffer, size_t size);
 
 
 
-int blend_images(const char *front, const char *back) {
-    assert(front && "Path to foreground image is null ptr!\n");
-    assert(back && "Path to background image is null ptr!\n");
+int blend_images(const char *front_filename, const char *back_filename) {
+    assert(front_filename && "Path to foreground image is null ptr!\n");
+    assert(back_filename && "Path to background image is null ptr!\n");
 
     sf::RenderWindow window(sf::VideoMode(SCREEN_W, SCREEN_H), "AlphaBlending3000");
 
@@ -128,12 +128,14 @@ int blend_images(const char *front, const char *back) {
     REPEAT(safe_aligned_alloc(&pixels, IMG_BUFFER_SIZE));
 
     uint8_t *front_pixels = nullptr, *back_pixels = nullptr;
-    REPEAT(load_images(front, back, &front_pixels, &back_pixels), free(pixels););
+    REPEAT(load_images(front_filename, back_filename, &front_pixels, &back_pixels), free(pixels););
 
     sf::Image tool_image;
     sf::Texture tool_texture;
 
-    blend_pixels(pixels, front_pixels, back_pixels);
+    sf::Clock clock;
+    for (size_t i = 0; i < 10000; i++) blend_pixels(pixels, front_pixels, back_pixels);
+    printf("%f, ", clock.getElapsedTime().asSeconds());
 
     tool_image.create(SCREEN_W, SCREEN_H, pixels);
     tool_texture.loadFromImage(tool_image);
@@ -198,8 +200,6 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
     assert(!((unsigned long long) buffer & (BUF_ALIGN - 1)) && "Buffer has invalid alignment!\n");
     assert(!((unsigned long long) front & (BUF_ALIGN - 1)) && "Front buffer has invalid alignment!\n");
     assert(!((unsigned long long) back & (BUF_ALIGN - 1)) && "Back buffer has invalid alignment!\n");
-
-    sf::Clock clock;
 
     for (uint32_t y = 0; y < SCREEN_H; y++) {
         #ifdef OPTI
@@ -292,8 +292,6 @@ void blend_pixels(uint8_t *buffer, const uint8_t *front, const uint8_t *back) {
 
         #endif
     }
-
-    printf("%f\n", clock.getElapsedTime().asSeconds());
 }
 
 
